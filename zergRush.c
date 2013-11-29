@@ -1,9 +1,24 @@
-/* android 2.2/2.3 libsysutils root exploit use-after-free
+/* zergRush
+ * android 2.2/2.3 libsysutils root exploit use-after-free
+ * Copyright (c) 2011, The Revolutionary development team.
  *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation, either version 3 of the License, or (at your
+ * option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ * Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/*
  * Exploited by rewriting a FrameworkCommand object making the runCommand
  * point to our first ROP gadget.
- *
- * Copyright (c) 2011, The Revolutionary development team.
  *
  * Before using, insert empty formatted sdcard. USE IT AT YOUR OWN RISK,
  * THIS PROGRAM MIGHT NOT WORK OR MAKES YOUR DEVICE USELESS/BRICKED.  SO BE
